@@ -1,7 +1,7 @@
 let cluster = require('cluster')
 const os = require('os')
 const cpuCount = os.cpus().length
-let size = 100000;
+let size = 26000;
 const wsize = Math.floor(size * 1.25)
 if (cluster.isMaster) {
     const {
@@ -21,38 +21,31 @@ if (cluster.isMaster) {
     }
 
     let nextLine = 0;
-    let finishCount = 0;
     cluster.on('online', (worker) => {
-        worker.send(JSON.stringify({
-            'line': nextLine
-        }))
-        console.log(`Processing (${nextLine}/${size})`)
-
-        nextLine++
+        if (nextLine > size) {
+            worker.kill();
+        } else {
+            worker.send(JSON.stringify({
+                'line': nextLine
+            }))
+            console.log(`Processing (${nextLine}/${size})`)
+            nextLine++
+        }
 
         worker.on('message', function (msg) {
             msg = JSON.parse(msg)
             for (let i = 0; i < msg.data.length; i++) {
                 ctx.fillStyle = colors[msg.data[i][1] ? 0 : (msg.data[i][0] % colors.length - 1) + 1]
-                ctx.fillRect(i,msg.line, 1, 1)
-
+                ctx.fillRect(i, msg.line, 1, 1)
             }
             if (nextLine <= size) {
-                worker.kill();
                 cluster.fork();
             } else {
                 const out = fs.createWriteStream(__dirname + `/mandelbrot${size}x${wsize}.png`)
                 const stream = canvas.createPNGStream()
                 stream.pipe(out)
-                out.on('finish', () => {
-                    //this section will run the # of CPU cores, so wait until this is executed 8 times.
-                    finishCount++;
-                    if (finishCount == cpuCount) {
-                        console.log('finished!')
-                        process.exit();
-                    }
-                })
             }
+            worker.kill();
         });
     });
 
