@@ -1,57 +1,48 @@
 let cluster = require('cluster')
 const os = require('os')
 const cpuCount = os.cpus().length
-let size = 26000;
+const fs = require('fs')
+let size = 200;
 const wsize = Math.floor(size * 1.25)
 if (cluster.isMaster) {
-    const {
-        createCanvas
-    } = require('canvas')
-    const canvas = createCanvas(wsize, size)
-    let ctx = canvas.getContext('2d')
-    let fs = require('fs');
 
-    const colors = new Array(16).fill(0).map((_, i) => `#00${((i*16).toString(16)).padEnd(4,0)}`)
+    if (!fs.existsSync(`./images/${size}x${wsize}`)) {
+        fs.mkdirSync(`./images/${size}x${wsize}`);
+    }
+    if (!fs.existsSync(`./images/${size}x${wsize}/data`)) {
+        fs.mkdirSync(`./images/${size}x${wsize}/data`);
+    }
 
+    fs.writeFileSync(__dirname + `/images/${size}x${wsize}/index.json`, JSON.stringify({
+        'size': size
+    }));
 
-    //divides up pixels for processing
-    //Maybe do line-by-line, top to bottom?
     for (let i = 0; i < cpuCount; i++) {
         cluster.fork();
     }
 
     let nextLine = 0;
     cluster.on('online', (worker) => {
-        if (nextLine > size) {
+        if (nextLine > Math.ceil(size/2)) {
             worker.kill();
         } else {
             worker.send(JSON.stringify({
                 'line': nextLine
             }))
-            console.log(`Processing (${nextLine}/${size})`)
+            console.log(`Processing (${nextLine}/${Math.ceil(size/2)})`)
             nextLine++
         }
 
-        worker.on('message', function (msg) {
-            msg = JSON.parse(msg)
-            for (let i = 0; i < msg.data.length; i++) {
-                ctx.fillStyle = colors[msg.data[i][1] ? 0 : (msg.data[i][0] % colors.length - 1) + 1]
-                ctx.fillRect(i, msg.line, 1, 1)
-            }
-            if (nextLine <= size) {
+        worker.on('exit', (msg) => {
+            if (nextLine <= Math.ceil(size/2)) {
                 cluster.fork();
-            } else {
-                const out = fs.createWriteStream(__dirname + `/mandelbrot${size}x${wsize}.png`)
-                const stream = canvas.createPNGStream()
-                stream.pipe(out)
             }
-            worker.kill();
         });
     });
 
 } else {
     //mandelbrot worker
-    const MAX_ITERATION = 200
+    const MAX_ITERATION = 80
 
     function mandelbrot(c) {
         let z = {
@@ -77,21 +68,16 @@ if (cluster.isMaster) {
     process.on('message', (msg) => {
         msg = JSON.parse(msg)
         const x = msg.line
-        const res = {
-            'line': msg.line,
-            'data': []
-        }
+        let data = ''
         for (let i = 0; i < wsize; i++) {
             complex = {
                 x: -2 + (i / size) * 2,
                 y: -1 + (x / size) * 2
             }
-            res.data.push(mandelbrot(complex))
+            let mdb = mandelbrot(complex)
+            data += (mdb[1] ? 0 : (mdb[0] % 15) + 1).toString(16)
         }
-        process.send(JSON.stringify(res))
+        fs.writeFileSync(__dirname + `/images/${size}x${wsize}/data/${x}.txt`, data, 'hex')
+        process.exit()
     })
-
-
-
-
 }
